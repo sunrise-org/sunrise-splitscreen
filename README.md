@@ -1,7 +1,7 @@
 # Sunrise Splitscreen
 
-Local splitscreen for [Sunrise](https://github.com/sunrise-org/sunrise), as an official native mod. Extra seats play on
-the host's account; a second account is optional, never required.
+Local splitscreen for [Sunrise](https://github.com/sunrise-org/sunrise), as an official native mod. Extra seats need
+no account of their own and never use the host's credentials. Own-account guest sign-in is not part of the cutover.
 
 This repository currently contains the local-seat admission foundation. It does not replace the game's startup or add
 player controls. See the [cutover plan](docs/plan.md) for how the mod will replace built-in splitscreen.
