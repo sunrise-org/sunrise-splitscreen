@@ -1,0 +1,67 @@
+id = "splitscreen"
+name = "Sunrise Splitscreen"
+version = "0.1.0"
+description = "Local splitscreen for Sunrise"
+authors = ["Sunrise"]
+api = "0.2"
+side = "client"
+capabilities = ["registries"]
+
+[native]
+game = "26.3"
+sunrise = "68b51161354df882c903467bd891a7996e08c11f"
+mixins = "e59da9094f0c2fdda6c627fe9eff22dec6a906f0"
+
+[[native.module]]
+id = "windowed-app"
+file = "crates/sunrise-client/src/game/runtime/loading_screen.rs"
+name = "splitscreen_app"
+source = "src/app.rs"
+
+[[native.mixin]]
+id = "direct-run-app"
+target = "sunrise_client::game::loading_screen::run_event_loop"
+kind = "OVERWRITE"
+helper = "src/mixins/direct.rs"
+bindings = [{ name = "game", ty = "Game<'_>", value = "game" }]
+
+[[native.mixin]]
+id = "loading-run-app"
+target = "sunrise_client::game::resource_loader::run_loading"
+kind = "OVERWRITE"
+helper = "src/mixins/loading.rs"
+bindings = [
+  { name = "options", ty = "Options", value = "options" },
+  { name = "settings", ty = "Settings", value = "settings" },
+  { name = "vanilla_root", ty = "PathBuf", value = "vanilla_root" },
+  { name = "pack_error", ty = "Option<String>", value = "pack_error" },
+  { name = "started", ty = "Instant", value = "started" },
+]
+
+[[native.module]]
+id = "integrated-admission"
+file = "crates/sunrise-client/src/game/world/integrated.rs"
+name = "splitscreen_admission"
+source = "src/admission.rs"
+
+[[native.mixin]]
+id = "integrated-login-gate"
+target = "sunrise_client::game::developer_launch::Game::lan_host"
+kind = "WRAP_OPERATION"
+selector = "self.start_lan_hub"
+require = 1
+ordinal = 0
+helper = "src/mixins/configure.rs"
+bindings = [
+  { name = "game", ty = "&mut Game<'_>", value = "$receiver" },
+  { name = "settings", ty = "LanSettings", value = "$arg0" },
+  { name = "net", ty = "NetConfig", value = "$arg1" },
+  { name = "hub", ty = "HubConfig", value = "$arg2" },
+  { name = "start", ty = "impl FnOnce(&mut Game<'_>, LanSettings, NetConfig, HubConfig) -> Result<()>", value = "$operation" },
+]
+
+[[native.mixin]]
+id = "integrated-admission-close"
+target = "sunrise_client::game::integrated::Game::stop_serving"
+kind = "HEAD"
+helper = "src/mixins/close.rs"

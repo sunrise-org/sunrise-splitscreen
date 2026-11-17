@@ -1,0 +1,37 @@
+name: Splitscreen
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+    inputs:
+      sdk_tag:
+        description: Exact SDK release tag (sdk- followed by the full game commit); blank uses the manifest pin
+        type: string
+        required: false
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    # A fork's head may not execute on the self-hosted pool.
+    if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository
+    runs-on: ${{ vars.SPLITSCREEN_CI_RUNNER }}
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - name: Check and package against the signed Sunrise SDK
+        id: sdk
+        env:
+          SDK_TAG: ${{ inputs.sdk_tag }}
+        run: bash tools/build-sdk.sh
+      - uses: actions/upload-artifact@v4
+        with:
+          name: splitscreen-${{ steps.sdk.outputs.sdk_tag }}-unsigned
+          path: target/${{ steps.sdk.outputs.sdk_tag }}/
+          if-no-files-found: error
+          retention-days: 7
