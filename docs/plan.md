@@ -5,9 +5,11 @@ prebuilt game. The mod owns guest instances and their composition; it does not a
 instance role, or a splitscreen-specific extension point. Start with two local players in one
 window. Ship only the exact SDK builds on which containment and primary behavior are verified.
 
-The signed SDK currently contains built-in splitscreen. Its seats keep using stock admission while
-we prove the replacement. The mod does not call `Integrated::join_split` or `leave_split`, and the
-released mod will not keep the temporary stock-seat exception.
+The pinned signed SDK still contains built-in splitscreen, but Sunrise is removing it now from
+its engine, mod API and launcher, ahead of mod parity. Splitscreen will be unavailable on those
+builds until the mod ships. The foundation remains pinned to the existing signed SDK. It leaves
+stock admission alone on that pin; it does not call `Integrated::join_split` or `leave_split`.
+Drop the temporary stock-seat exception when moving to an SDK without the built-in feature.
 
 ## Build the replacement
 
@@ -19,8 +21,8 @@ released mod will not keep the temporary stock-seat exception.
    Umut, is the existing eight-player hub cap for P1, local seats and LAN guests together.
    Sixteen views are a layout test only. If Sunrise instead adopts a generic network cap that
    excludes in-process connections, revisit the gameplay cap and the device bus table size
-   together. The device bus's 16 indices are not an admission rule. CI tests the ticket policy and builds a separate private-resource
-   smoke driver. `build` and `dco` are required checks; the build uses the configured pool with
+   together. The device bus's 16 indices are not an admission rule. CI tests the ticket policy
+   and builds a separate private-resource smoke driver. `build` and `dco` are required checks; the build uses the configured pool with
    a live lease on eligible events, or a GitHub-hosted runner otherwise. After this workflow
    reaches the default branch, dispatch `.github/workflows/build.yml` once with `force_hosted: true`
    and record the hosted build result. Ordinary lease routing stays unchanged.
@@ -72,9 +74,9 @@ error, and a general fix for each missing capability. Do not add a feature-speci
 the engine. The two startup wraps remain blocked until a signed SDK ships the receiver fix.
 
 The candidate inventory below was traced on Sunrise `817fe45`; the foundation implements none of
-these guest patches. Paths start at `crates/sunrise-client/src/`; targets start at `sunrise_client::`. W means `WRAP_OPERATION`
-with the named call selector; H means a cancellable `HEAD` on the named function, with no call
-selector. Confirm the targets and exact match counts against the cutover SDK. Do not start guests
+these guest patches. Paths start at `crates/sunrise-client/src/`; targets start at `sunrise_client::`.
+W means `WRAP_OPERATION` with the named call selector; H means a cancellable `HEAD` on the named
+function, with no call selector. Confirm the targets and exact match counts against the cutover SDK. Do not start guests
 if a required patch is missing. At each SDK update, also audit newly reachable calls: an old
 selector still matching does not prove that no new guest path reaches an account service.
 
@@ -100,8 +102,9 @@ engine change for memory-only guests.
 
 ## Remove the built-in implementation
 
-Compile the mod against the exact cutover candidate SDK and drop its temporary stock-seat fallback
-and every split-only reference. Audit the deletion on that head, not just the SDK pinned today.
+This deletion is separate and does not wait for the mod. Audit it on the removal PR's head. Once
+there is a signed SDK from that tree, compile the mod against it and drop the mod's temporary
+stock-seat exception and any other dependency on the old implementation.
 
 | Area | Remove or move to the mod | Keep or generalize |
 | --- | --- | --- |
@@ -141,10 +144,10 @@ git ls-files crates launcher | grep -iE "$pattern"
 - On the same hardware, scene, settings and render resolution, use the existing performance
   platform to collect total frame time p50/p99 and CPU and GPU frame time p50. Repeat captures to
   establish the run-to-run noise band. The candidate without the mod must stay within that band
-  of pre-cutover main at one seat. The candidate with the mod loaded at one seat must be no more
+  of the last build with built-in splitscreen at one seat. The candidate with the mod loaded at one seat must be no more
   than 3% worse than the same candidate without it on each metric. The mod at 2 and 4 seats must
   be no more than 3% worse than built-in splitscreen at the corresponding seat count on each
   metric. Record tick time and memory alongside these gates.
-- Coordinate the engine removal and official mod release only after the pair passes. Admission
-  alone is not enough. Track the move in [#505](https://github.com/sunrise-org/sunrise/issues/505)
+- Release the mod only after it passes these checks on an exact signed SDK without built-in
+  splitscreen. The engine deletion is not gated on these checks. Admission alone is not enough. Track the move in [#505](https://github.com/sunrise-org/sunrise/issues/505)
   and [#617](https://github.com/sunrise-org/sunrise/issues/617).
