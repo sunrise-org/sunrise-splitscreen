@@ -10,6 +10,10 @@ on:
         description: Exact SDK release tag (sdk- followed by the full game commit); blank uses the manifest pin
         type: string
         required: false
+      force_hosted:
+        description: Verify the build on a GitHub-hosted runner even if the pool lease is active
+        type: boolean
+        default: false
 
 permissions:
   contents: read
@@ -22,6 +26,7 @@ jobs:
     steps:
       - id: pool
         env:
+          FORCE_HOSTED: ${{ github.event_name == 'workflow_dispatch' && inputs.force_hosted }}
           LEASE: ${{ vars.DYNA_CI_POOL_UNTIL }}
           POOL: ${{ vars.SPLITSCREEN_CI_RUNNER }}
           SERVED: >-
@@ -29,7 +34,7 @@ jobs:
             github.event.pull_request.head.repo.full_name == github.repository }}
         run: |
           runner=ubuntu-latest
-          if [[ "$SERVED" == true && -n "$POOL" && "$LEASE" =~ ^[0-9]{1,12}$ ]] &&
+          if [[ "$FORCE_HOSTED" != true && "$SERVED" == true && -n "$POOL" && "$LEASE" =~ ^[0-9]{1,12}$ ]] &&
              [ "$LEASE" -gt "$(date +%s)" ]; then
             runner=$POOL
           fi

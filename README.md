@@ -16,8 +16,9 @@ CI does not run the in-game smoke because it needs private game resources. To ru
 set `SPLITSCREEN_TEST_RESOURCES` to a prepared resource directory and rerun the same command with Xvfb and a renderer.
 
 The `Splitscreen` workflow also accepts an `sdk_tag` of the form `sdk-<full commit>`. This rebuilds a scratch copy
-against the named SDK without changing the repository's pin. These builds are not player releases. Once the mod is
-ready and signed, each version goes through the normal [sunrise-mods](https://github.com/sunrise-org/sunrise-mods#submitting-a-project)
+against the named SDK without changing the repository's pin. Set `force_hosted: true` on a manual run to use a
+GitHub-hosted runner even when the pool lease is active. These builds are not player releases. Once the mod is ready
+and signed, each version goes through the normal [sunrise-mods](https://github.com/sunrise-org/sunrise-mods#submitting-a-project)
 submission process.
 
 Licence: [PolyForm Shield 1.0.0](LICENSE). See [CONTRIBUTING.md](CONTRIBUTING.md) for the DCO sign-off.
