@@ -3,14 +3,17 @@
 Local splitscreen for [Sunrise](https://github.com/sunrise-org/sunrise), as an official native mod. Extra seats play on
 the host's account; a second account is optional, never required.
 
-This repository currently contains the native startup and local-seat admission foundation. It does not yet add a way
-for players to open or control a second view.
+This repository currently contains the local-seat admission foundation. It does not replace the game's startup or add
+player controls. See the [cutover plan](docs/plan.md) for how the mod will replace built-in splitscreen.
 
 ## Build
 
 On x86-64 Linux, run `bash tools/build-sdk.sh`. It verifies the signed SDK pinned by `sunrise-mod.toml`, checks the mod
 with the SDK's Rust toolchain, builds the native patch without rebuilding the game, and writes an unsigned source
-package to `target/sdk-<commit>/splitscreen.smod`. No game resources or player account are required for this check.
+package to `target/sdk-<commit>/splitscreen.smod`. Clippy and the unit tests cover the mod crate and seat policy. The
+native adapter and smoke driver compile against the signed SDK; the injected engine code is not linted by Clippy.
+CI does not run the in-game smoke because it needs private game resources. To run both windowed smoke starts locally,
+set `SPLITSCREEN_TEST_RESOURCES` to a prepared resource directory and rerun the same command with Xvfb and a renderer.
 
 The `Splitscreen` workflow also accepts an `sdk_tag` of the form `sdk-<full commit>`. This rebuilds a scratch copy
 against the named SDK without changing the repository's pin. These builds are not player releases. Once the mod is

@@ -1,3 +1,5 @@
+pub mod seats;
+
 #[derive(Default)]
 struct Splitscreen;
 

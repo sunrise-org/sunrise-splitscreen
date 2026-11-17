@@ -15,13 +15,32 @@ permissions:
   contents: read
 
 jobs:
+  route:
+    runs-on: ubuntu-latest
+    outputs:
+      runner: ${{ steps.pool.outputs.runner }}
+    steps:
+      - id: pool
+        env:
+          LEASE: ${{ vars.DYNA_CI_POOL_UNTIL }}
+          POOL: ${{ vars.SPLITSCREEN_CI_RUNNER }}
+          SERVED: >-
+            ${{ github.event_name != 'pull_request' ||
+            github.event.pull_request.head.repo.full_name == github.repository }}
+        run: |
+          runner=ubuntu-latest
+          if [[ "$SERVED" == true && -n "$POOL" && "$LEASE" =~ ^[0-9]{1,12}$ ]] &&
+             [ "$LEASE" -gt "$(date +%s)" ]; then
+            runner=$POOL
+          fi
+          echo "runner=$runner" >> "$GITHUB_OUTPUT"
+
   build:
-    # A fork's head may not execute on the self-hosted pool.
-    if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository
-    runs-on: ${{ vars.SPLITSCREEN_CI_RUNNER }}
+    needs: route
+    runs-on: ${{ needs.route.outputs.runner }}
     timeout-minutes: 30
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
         with:
           persist-credentials: false
       - name: Check and package against the signed Sunrise SDK
@@ -29,7 +48,7 @@ jobs:
         env:
           SDK_TAG: ${{ inputs.sdk_tag }}
         run: bash tools/build-sdk.sh
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
           name: splitscreen-${{ steps.sdk.outputs.sdk_tag }}-unsigned
           path: target/${{ steps.sdk.outputs.sdk_tag }}/

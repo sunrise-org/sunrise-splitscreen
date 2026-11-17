@@ -13,32 +13,6 @@ sunrise = "68b51161354df882c903467bd891a7996e08c11f"
 mixins = "e59da9094f0c2fdda6c627fe9eff22dec6a906f0"
 
 [[native.module]]
-id = "windowed-app"
-file = "crates/sunrise-client/src/game/runtime/loading_screen.rs"
-name = "splitscreen_app"
-source = "src/app.rs"
-
-[[native.mixin]]
-id = "direct-run-app"
-target = "sunrise_client::game::loading_screen::run_event_loop"
-kind = "OVERWRITE"
-helper = "src/mixins/direct.rs"
-bindings = [{ name = "game", ty = "Game<'_>", value = "game" }]
-
-[[native.mixin]]
-id = "loading-run-app"
-target = "sunrise_client::game::resource_loader::run_loading"
-kind = "OVERWRITE"
-helper = "src/mixins/loading.rs"
-bindings = [
-  { name = "options", ty = "Options", value = "options" },
-  { name = "settings", ty = "Settings", value = "settings" },
-  { name = "vanilla_root", ty = "PathBuf", value = "vanilla_root" },
-  { name = "pack_error", ty = "Option<String>", value = "pack_error" },
-  { name = "started", ty = "Instant", value = "started" },
-]
-
-[[native.module]]
 id = "integrated-admission"
 file = "crates/sunrise-client/src/game/world/integrated.rs"
 name = "splitscreen_admission"

@@ -1,37 +1,33 @@
-//! An integrated world's in-process seats. The stock owner and LAN policy still governs every
-//! connection except an explicitly reserved local seat.
+//! Connects the testable seat policy to Sunrise's integrated-server and memory-transport lifetimes.
 use super::{Flags, Game};
-use std::cell::RefCell;
-use std::collections::HashMap;
-use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::{Arc, Mutex, Weak, mpsc};
-use std::time::{Duration, Instant};
+use mod_splitscreen::seats::{Connection, Decision, Seats, Ticket};
+use std::{
+    cell::RefCell,
+    sync::{Arc, Mutex, Weak, mpsc},
+    time::{Duration, Instant},
+};
 use sunrise_client::lan::{
     NetConfig,
-    conn::{MEMORY_ADDRESS, valid_name},
+    conn::{MEMORY_ADDRESS, serve_local, valid_name},
 };
 use sunrise_protocol::{connection::Pipe, crypto::offline_uuid, text::translatable};
 
 const HANDSHAKE_TIMEOUT: Duration = Duration::from_secs(30);
-const MAX_GUESTS: usize = 15;
-
-struct Ticket {
-    name: String,
-    uuid: u128,
-    deadline: Instant,
-    used: AtomicBool,
-}
+const MAX_GUESTS: usize = sunrise_client::split_layout::MAX_PLAYERS - 1;
+type StockSeat = Arc<dyn Fn(u128) -> bool + Send + Sync>;
 
 pub(crate) struct Gate {
-    owner_name: String,
     owner: u128,
-    tickets: Mutex<Option<HashMap<u128, Weak<Ticket>>>>,
+    seats: Mutex<Seats>,
+    stock_seat: Option<StockSeat>,
 }
 
 thread_local! {
-    // A dispatch pointer for work already queued to this server thread, not a world owner.
-    // The world's network gate owns the only lasting strong reference.
+    // Weak dispatch pointer on the integrated owner thread. The world's gate owns the state.
     static SERVER_GATE: RefCell<Weak<Gate>> = const { RefCell::new(Weak::new()) };
+    // Only the server thread for the specific pipe opened below carries this token. It is not a
+    // login packet field and can't be sent from another memory connection or from the network.
+    static PIPE_TICKET: RefCell<Weak<Ticket>> = const { RefCell::new(Weak::new()) };
 }
 
 impl Gate {
@@ -41,95 +37,95 @@ impl Gate {
             return None;
         }
         let original = net.gate.take()?;
-        let stock_seat = net.bypasses_limit.clone();
         let gate = Arc::new(Self {
-            owner_name,
             owner,
-            tickets: Mutex::new(Some(HashMap::new())),
+            seats: Mutex::new(Seats::new(owner_name, owner, MAX_GUESTS)),
+            stock_seat: net.bypasses_limit.clone(),
         });
         let admission = Arc::clone(&gate);
         net.gate = Some(Arc::new(move |address, uuid, name| {
-            let memory = address == MEMORY_ADDRESS;
-            let ticket = admission
-                .tickets
-                .lock()
-                .ok()
-                .and_then(|tickets| tickets.as_ref()?.get(&uuid)?.upgrade());
-            if let Some(ticket) = ticket {
-                if memory
-                    && ticket.name == name
-                    && Instant::now() < ticket.deadline
-                    && !ticket.used.swap(true, Ordering::Relaxed)
-                {
-                    return None;
-                }
-                return Some(translatable("multiplayer.disconnect.not_whitelisted", &[]));
+            let known_stock_seat = admission.is_stock_seat(uuid);
+            let ticket = PIPE_TICKET.with_borrow(Weak::upgrade);
+            let connection = if address == MEMORY_ADDRESS {
+                Connection::Memory(ticket.as_deref())
+            } else {
+                Connection::Network
+            };
+            let decision = admission.seats.lock().map_or(Decision::Deny, |seats| {
+                seats.decide(connection, uuid, name, known_stock_seat, Instant::now())
+            });
+            match decision {
+                Decision::Stock => original(address, uuid, name),
+                Decision::Allow => None,
+                Decision::Deny => Some(translatable("multiplayer.disconnect.not_whitelisted", &[])),
             }
-            // In a published world the stock gate accepts every unreserved memory connection.
-            // Only P1, an existing built-in seat on this SDK, or a one-shot ticket can use memory.
-            if memory && uuid != owner && !stock_seat.as_ref().is_some_and(|seat| seat(uuid)) {
-                return Some(translatable("multiplayer.disconnect.not_whitelisted", &[]));
-            }
-            original(address, uuid, name)
         }));
         Some(gate)
     }
 
     pub(crate) fn install(gate: Option<Arc<Self>>) {
         SERVER_GATE
-            .with(|slot| *slot.borrow_mut() = gate.as_ref().map_or_else(Weak::new, Arc::downgrade));
+            .with_borrow_mut(|slot| *slot = gate.as_ref().map_or_else(Weak::new, Arc::downgrade));
     }
 
     pub(crate) fn close() {
-        let gate = SERVER_GATE.with(|slot| std::mem::take(&mut *slot.borrow_mut()).upgrade());
+        let gate = SERVER_GATE.with_borrow_mut(|slot| std::mem::take(slot).upgrade());
         if let Some(gate) = gate
-            && let Ok(mut tickets) = gate.tickets.lock()
+            && let Ok(mut seats) = gate.seats.lock()
         {
-            *tickets = None;
+            seats.close();
         }
+    }
+
+    fn is_stock_seat(&self, uuid: u128) -> bool {
+        self.stock_seat.as_ref().is_some_and(|seat| seat(uuid))
     }
 
     fn open_pipe(&self, game: &Game<'_>, ticket: &Arc<Ticket>) -> Option<Pipe> {
         let host = game.lan.as_ref()?;
-        let owner = host.owner.as_ref()?;
-        if owner.uuid != self.owner
+        if host.owner.as_ref()?.uuid != self.owner
             || !host
                 .hub
                 .guests
                 .iter()
                 .any(|player| player.uuid == self.owner)
-            || ticket.uuid == self.owner
-            || ticket.name.eq_ignore_ascii_case(&self.owner_name)
-            || host.hub.guests.iter().any(|player| {
-                player.uuid == ticket.uuid || player.name.eq_ignore_ascii_case(&ticket.name)
-            })
         {
             return None;
         }
-        let mut table = self.tickets.lock().ok()?;
-        let tickets = table.as_mut()?;
-        tickets.retain(|_, ticket| ticket.strong_count() > 0);
-        if tickets.len() >= MAX_GUESTS
-            || tickets.values().filter_map(Weak::upgrade).any(|other| {
-                other.uuid == ticket.uuid || other.name.eq_ignore_ascii_case(&ticket.name)
-            })
+        let known_stock_seat = self.is_stock_seat(ticket.uuid);
+        let online = host
+            .hub
+            .guests
+            .iter()
+            .map(|player| (player.uuid, player.name.as_str()));
+        if !self
+            .seats
+            .lock()
+            .ok()?
+            .reserve(ticket, known_stock_seat, online)
         {
             return None;
         }
-        tickets.insert(ticket.uuid, Arc::downgrade(ticket));
-        // The connection thread cannot present a hello before the pipe is returned to its caller.
-        host.hub
-            .lan
-            .connect_local()
-            .inspect_err(|_| {
-                tickets.remove(&ticket.uuid);
-            })
-            .ok()
+        // Same server-end transport and worker as Lan::connect_local, but bind this connection
+        // to its own reservation before any login processing can run.
+        let (client, pipe) = Pipe::pair();
+        let shared = Arc::clone(&host.hub.lan.shared);
+        let ticket = Arc::downgrade(ticket);
+        sunrise_guest_stack::spawn("sunrise-local-conn".into(), move || {
+            PIPE_TICKET.with_borrow_mut(|slot| *slot = ticket);
+            if let Err(error) = serve_local(pipe, shared)
+                && std::env::var_os("SUNRISE_NET_DEBUG").is_some()
+            {
+                log::warn!("[lan] local: {error}");
+            }
+        })
+        .ok()?;
+        Some(client)
     }
 }
 
-/// The pending pipes owned by the window, keyed to the exact integrated server rather than to
-/// a world name or save path that might be reopened. A guest view keeps its ticket while it plays.
+/// The pending pipes owned by a client handler, scoped to one particular integrated world.
+/// The first UI caller lands with the guest view; the local smoke fixture drives it in this PR.
 #[derive(Default)]
 pub(crate) struct WorldSeats {
     world: Weak<Flags>,
@@ -143,8 +139,8 @@ struct Pending {
 
 pub(crate) struct SeatPipe {
     pub(crate) pipe: Pipe,
-    // Dropping a pending join or guest revokes the ticket. The gate only holds its Weak pointer.
-    _ticket: Arc<Ticket>,
+    // Dropping the guest revokes the ticket; the network gate holds only a Weak reference.
+    pub(crate) lease: Arc<Ticket>,
 }
 
 impl WorldSeats {
@@ -152,22 +148,13 @@ impl WorldSeats {
         let world = game.integrated.as_ref().filter(|world| !world.stopped());
         if !world.is_some_and(|world| std::ptr::eq(Arc::as_ptr(&world.flags), self.world.as_ptr()))
         {
-            self.clear();
-            if let Some(world) = world {
-                self.world = Arc::downgrade(&world.flags);
-            }
+            self.pending.clear();
+            self.world = world.map_or_else(Weak::new, |world| Arc::downgrade(&world.flags));
         }
         self.pending
             .retain(|pending| Instant::now() < pending.ticket.deadline);
     }
 
-    pub(crate) fn clear(&mut self) {
-        self.pending.clear();
-        self.world = Weak::new();
-    }
-
-    // The guest renderer/profile flow will request a pipe, then retain the returned seat lease for
-    // its session. Nothing requests a seat automatically on startup.
     pub(crate) fn request(&mut self, game: &Game<'_>, name: String) -> bool {
         self.track(game);
         let Some(server) = game.integrated.as_ref().filter(|server| !server.stopped()) else {
@@ -176,16 +163,12 @@ impl WorldSeats {
         if !valid_name(&name) || self.pending.len() >= MAX_GUESTS {
             return false;
         }
-        let ticket = Arc::new(Ticket {
-            uuid: offline_uuid(&name),
-            name,
-            deadline: Instant::now() + HANDSHAKE_TIMEOUT,
-            used: AtomicBool::new(false),
-        });
+        let uuid = offline_uuid(&name);
+        let ticket = Arc::new(Ticket::new(name, uuid, Instant::now() + HANDSHAKE_TIMEOUT));
         let (tx, pipe) = mpsc::sync_channel(1);
         let request = Arc::downgrade(&ticket);
         if !server.post(move |game| {
-            let gate = SERVER_GATE.with(|slot| slot.borrow().upgrade());
+            let gate = SERVER_GATE.with_borrow(Weak::upgrade);
             let opened = match (gate, request.upgrade()) {
                 (Some(gate), Some(ticket)) if Instant::now() < ticket.deadline => {
                     gate.open_pipe(game, &ticket)
@@ -210,7 +193,7 @@ impl WorldSeats {
             let Pending { ticket, .. } = self.pending.remove(index);
             return Some(pipe.map(|pipe| SeatPipe {
                 pipe,
-                _ticket: ticket,
+                lease: ticket,
             }));
         }
         None

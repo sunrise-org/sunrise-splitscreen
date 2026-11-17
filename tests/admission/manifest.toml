@@ -1,0 +1,16 @@
+
+[[native.module]]
+id = "admission-fixture-driver"
+file = "crates/sunrise-client/src/game/world/integrated.rs"
+name = "splitscreen_fixture"
+source = "src/fixture.rs"
+
+[[native.mixin]]
+id = "admission-fixture-tick"
+target = "sunrise_client::game::window_handler::Game::idle"
+kind = "HEAD"
+helper = "src/mixins/fixture.rs"
+bindings = [
+  { name = "game", ty = "&mut Game<'_>", value = "self" },
+  { name = "event_loop", ty = "&dyn EventLoopCtl", value = "event_loop" },
+]

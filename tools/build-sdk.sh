@@ -48,24 +48,47 @@ if ! rustc -Vv | awk -v host="$host" -v rust="$rust" '
 fi
 
 cd -- "$project"
-find src -name '*.rs' -print0 | xargs -0 rustfmt --check --edition 2024
+find src "$root/tests" -name '*.rs' -print0 | xargs -0 rustfmt --check --edition 2024
 cargo clippy --all-targets --locked -- -D warnings
+cargo test --locked
 
 tool=$scratch/tool/cargo-sunrise-mod
-jq -nc --arg dir "$toolchain" --arg host "$host" --arg cargo "${CARGO_HOME:-$HOME/.cargo}" \
-    --arg s "$scratch" --arg project "$project" '{
-      contract: 2,
-      work: ($s + "/work"),
-      toolchain: {dir: $dir, target: $host, cargo_home: $cargo, cargo_config: [], c_bin: null},
-      package: {runtime: ($s + "/runtime"), api: ($s + "/api"), engine: ($s + "/engine")},
-      mods: $project,
-      target: "client",
-      registry: false,
-    }' | "$tool" native-build | tee "$scratch/native-build.jsonl"
-tail -n 1 "$scratch/native-build.jsonl" | jq -e '.event == "built" and .route == "prebuilt"' >/dev/null
+native_build() {
+    local source=$1 result=$2
+    if ! jq -nc --arg dir "$toolchain" --arg host "$host" --arg cargo "${CARGO_HOME:-$HOME/.cargo}" \
+        --arg s "$scratch" --arg source "$source" '{
+          contract: 2,
+          work: ($s + "/work"),
+          toolchain: {dir: $dir, target: $host, cargo_home: $cargo, cargo_config: [], c_bin: null},
+          package: {runtime: ($s + "/runtime"), api: ($s + "/api"), engine: ($s + "/engine")},
+          mods: $source,
+          target: "client",
+          registry: false,
+        }' | "$tool" native-build > "$result.jsonl"; then
+        tail -n 1 "$result.jsonl" | jq -r .error >&2
+        return 1
+    fi
+    tail -n 1 "$result.jsonl" > "$result"
+    jq -e '.event == "built" and .route == "prebuilt"' "$result" >/dev/null
+}
+native_build "$project" "$scratch/package.json"
 "$tool" sunrise-mod build
 package=target/sunrise-mod/splitscreen.smod
 "$tool" sunrise-mod check "$package" --kind native-mod
+
+# Compile the real in-game driver in a separate package; it never ships in the artifact.
+fixture=$scratch/fixture
+mkdir "$fixture"
+cp -a -- "$project/"{Cargo.toml,Cargo.lock,sunrise-mod.toml,src} "$fixture/"
+cat "$root/tests/admission/manifest.toml" >> "$fixture/sunrise-mod.toml"
+cp -- "$root/tests/admission/driver.rs" "$fixture/src/fixture.rs"
+cp -- "$root/tests/admission/mixin.rs" "$fixture/src/mixins/fixture.rs"
+native_build "$fixture" "$scratch/fixture.json"
+echo 'Built the admission smoke fixture against the same prebuilt SDK'
+if [[ -n ${SPLITSCREEN_TEST_RESOURCES:-} ]]; then
+    bash "$root/tools/run-admission-smoke.sh" "$fixture" "$scratch/fixture.json"
+fi
+
 mkdir -p "$root/target/$tag"
 cp -- "$package" "$root/target/$tag/"
 (cd -- "$root/target/$tag" && sha256sum splitscreen.smod > SHA256SUMS)
