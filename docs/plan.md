@@ -1,5 +1,10 @@
 # Replacing the built-in splitscreen
 
+**Route M: one process, one window, no engine changes.** Use the mod API and native mixins on the
+prebuilt game. The mod owns guest instances and their composition; it does not add a factory, an
+instance role, or a splitscreen-specific extension point. Start with two local players in one
+window. Ship only the exact SDK builds on which containment and primary behavior are verified.
+
 The signed SDK currently contains built-in splitscreen. Its seats keep using stock admission while
 we prove the replacement. The mod does not call `Integrated::join_split` or `leave_split`, and the
 released mod will not keep the temporary stock-seat exception.
@@ -10,11 +15,11 @@ released mod will not keep the temporary stock-seat exception.
    and name. Only that pipe may use its single-use ticket, which expires with the request, view, or
    world. With no reservation and no ticket, defer to the game's own login gate, including its
    published-world policy. Never admit a ticket over TCP, pass P1's credentials, assign an operator
-   level, or change ordinary LAN permissions. Pending Sunrise's decision on how to count local
-   connections, the mod uses the existing eight-player hub cap for P1, local seats and LAN guests
-   together; 16 views are a layout test only. If Sunrise instead adopts a generic network cap
-   that excludes in-process connections, revisit the gameplay cap. The device bus's 16 indices
-   are not an admission rule. CI tests the ticket policy and builds a separate private-resource
+   level, or change ordinary LAN permissions. Our provisional default, not a cap decided by
+   Umut, is the existing eight-player hub cap for P1, local seats and LAN guests together.
+   Sixteen views are a layout test only. If Sunrise instead adopts a generic network cap that
+   excludes in-process connections, revisit the gameplay cap and the device bus table size
+   together. The device bus's 16 indices are not an admission rule. CI tests the ticket policy and builds a separate private-resource
    smoke driver. `build` and `dco` are required checks; the build uses the configured pool with
    a live lease on eligible events, or a GitHub-hosted runner otherwise. After this workflow
    reaches the default branch, dispatch `.github/workflows/build.yml` once with `force_hosted: true`
@@ -53,12 +58,21 @@ Fullscreen, process quit and signals, audio, activity, crash details and once-pe
 with P1. A guest may act only on a window it actually owns. The engine owns `seat()`; the mod
 depends on the general turn and settings-store scope in the
 [input spec](https://github.com/sunrise-org/sunrise/issues/2498). The mod never calls
-`engine::set_seat`. If the signed SDK cannot provide that scope, guest turns do not ship.
+`engine::set_seat`. The engine enters and restores the scope around each instance's frame, tick,
+event and settings operations. Controller input uses only the general device bus or mod API; the
+mod does not install another controller backend. If the signed SDK cannot provide the turn and
+store scope, guest turns do not ship.
 
 ### Native replacement checklist
 
-Candidate sites from Sunrise `817fe45`, not implemented or compiled by this foundation PR. Paths
-start at `crates/sunrise-client/src/`; targets start at `sunrise_client::`. W means `WRAP_OPERATION`
+Use the smallest set of patches that handles the paths a guest can actually reach. The guest-view
+PR records every applied patch's exact target, selector, purpose and what an engine refactor could
+break. Keep `MOD-API-GAPS.md` in the engineering handoff: record the exact SDK, file/line or tool
+error, and a general fix for each missing capability. Do not add a feature-specific workaround to
+the engine. The two startup wraps remain blocked until a signed SDK ships the receiver fix.
+
+The candidate inventory below was traced on Sunrise `817fe45`; the foundation implements none of
+these guest patches. Paths start at `crates/sunrise-client/src/`; targets start at `sunrise_client::`. W means `WRAP_OPERATION`
 with the named call selector; H means a cancellable `HEAD` on the named function, with no call
 selector. Confirm the targets and exact match counts against the cutover SDK. Do not start guests
 if a required patch is missing. At each SDK update, also audit newly reachable calls: an old
@@ -92,7 +106,7 @@ and every split-only reference. Audit the deletion on that head, not just the SD
 | Area | Remove or move to the mod | Keep or generalize |
 | --- | --- | --- |
 | Startup and client | `game/runtime/split/`, `mod split`, its direct and loading startup branches, `split_guest`, `split_auth`, `split_window`, `split_in_main_window`, `paced_by_split`, `split_hud` and the split-only title/menu/pad branches. | Both windowed starts and the loading handoff own a plain `Game`. Preserve solo, offscreen and headless behavior with the instance boundary above. Shift ordinary controller notices out of the split HUD. |
-| Render, settings and UI | Move `split_layout`, `split_map`, `split_profiles` and `split_ui`. Remove re-exports, `SplitSetup`, `SplitHelp`, `SPLIT_SETTINGS`, `SPLIT_TWO`/`THREE`, split-only option pages, labels and flags. Move or retire `sunrise.split.*` and `sunrise.pages.{open.,}split_*` locale keys. | Keep `gfx/compositor.rs` as a blit/composition primitive for offscreen views, with neutral docs, labels and errors. Preserve vanilla widgets and ordinary controller notices. |
+| Render, settings and UI | Move `split_layout`, `split_map`, `split_profiles` and `split_ui`. Remove re-exports, `Page::SplitSetup`, `split_setup`, `FrameDraw::SplitHelp`, `SPLIT_SETTINGS`, `open_split_settings`, `SPLIT_TWO`, `SPLIT_THREE`, split-only option pages, labels and flags. Move or retire `sunrise.split.*` and `sunrise.pages.{open.,}split_*` locale keys. | Keep `gfx/compositor.rs` as a blit/composition primitive for offscreen views, with neutral docs, labels and errors. Preserve vanilla widgets and ordinary controller notices. |
 | Integrated world | Remove `Flags::split_players`, `Integrated::{join_split, leave_split, has_split_players}`, the `owner_link.rs` split requests and handlers, inherited ops, `bypasses_limit` for seats, the `split_seat` gate branch, and the split-specific pause rule. | Keep memory-only owner login and the ordinary LAN gate. While another local client is active the mod keeps the world ticking, then lets stock pause policy resume. If pipe binding still uses the mod's worker adapter, require each SDK bump to check the signed `Lan::connect_local` and `serve_local` sources; fail on changes until the adapter is re-audited and both smokes pass. Do not add a feature-specific token. |
 | Hooks and shared state | Remove built-in splitscreen assumptions from `sunrise-hooks` seat/page docs and mod-vocab client-session, lifecycle and frame-hook docs. Audit shared input, HUD and presence code. | Use the engine-owned local instance index for existing per-view stores, pages and rendering. Preserve the hook contracts. |
 | Launcher | Remove the `SUNRISE_ACCOUNT_SESSIONS` export, its split-session list and renewal, `GameSession.env` plumbing used only for it, both defensive scrubs and related tests at cutover. | Preserve primary sign-in, renewal and session transport. Before removing the scrubs, prove old supported launch targets cannot inherit stale extra-account credentials; if that cannot be proven, block this step pending a general launch-environment fix. |
