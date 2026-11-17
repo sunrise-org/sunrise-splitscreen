@@ -49,8 +49,13 @@ fi
 
 cd -- "$project"
 find src "$root/tests" -name '*.rs' -print0 | xargs -0 rustfmt --check --edition 2024
-cargo clippy --all-targets --locked -- -D warnings
-cargo test --locked
+(
+    # The SDK generates Rust containing absolute source paths. Keep its build
+    # outputs with this scratch copy rather than reusing the runner's target dir.
+    export CARGO_TARGET_DIR="$project/target"
+    cargo clippy --all-targets --locked -- -D warnings
+    cargo test --locked
+)
 
 tool=$scratch/tool/cargo-sunrise-mod
 native_build() {
