@@ -16,7 +16,9 @@ released mod will not keep the temporary stock-seat exception.
    that excludes in-process connections, revisit the gameplay cap. The device bus's 16 indices
    are not an admission rule. CI tests the ticket policy and builds a separate private-resource
    smoke driver. `build` and `dco` are required checks; the build uses the configured pool with
-   a live lease on eligible events, or a GitHub-hosted runner otherwise.
+   a live lease on eligible events, or a GitHub-hosted runner otherwise. After this workflow
+   reaches the default branch, dispatch `.github/workflows/build.yml` once with `force_hosted: true`
+   and record the hosted build result. Ordinary lease routing stays unchanged.
 2. **Compose without replacing startup.** Wrap the two `run_app` calls with `WRAP_OPERATION` once a
    signed SDK carries the general [`?` receiver fix](https://github.com/sunrise-org/sunrise/pull/2521).
    Delegate P1 to the plain `Game`; the wrapper owns the other `Game` instances, offscreen views
@@ -30,47 +32,57 @@ released mod will not keep the temporary stock-seat exception.
    guest profiles. Defer own-account sign-in for another local player and call out that change
    in the release notes; do not depend on the launcher's bulk account export.
 
-## Local instance identity and authority
+## Guests play only in the host's world
 
-A general engine prerequisite for hosting more than one `Game` in a process: evolve the private
-role in [#2483](https://github.com/sunrise-org/sunrise/pull/2483) into an **instance role** with
-`Primary` and `Secondary { local_player_index }`. Keep this separate from server/client execution
-mode. Only the primary client owns process-wide effects. Window authority comes from actual
-window ownership, not the fact that an instance has a window reference: a secondary must not
-resize or fullscreen a shared window, but a separately owned window may be controlled by its
-owner. The compositor and its frame pacing belong to the host, not the instance role.
+The mod uses native function replacement on the exact signed game build. It adds no engine
+instance role and does not change P1's account or sign-in. The mod owns the secondary instances
+and identifies them before secondary setup or callbacks run. It never gives a secondary P1's
+launch options, a developer control socket, or an event-loop handle that can end the process.
 
-Construction supplies each `Game` its own optional account. The primary takes its account from
-normal launcher bootstrap. The mod creates a secondary with `None`; `Game::auth()` reads only the
-instance's account, never falls back to the process account, and the local guest session passes
-`None` too. Guest-reachable title, Realms, social and LAN-hosting paths must use the explicit
-instance account or refuse the operation; asynchronous work must take the account with it. Keep
-process-scoped account status, social and presence updates primary-only. Secondary clients in
-this mod join over memory only. A request to join an online server or open Realms must not start
-an authenticated request as P1. The native route is trusted engine code, not a mod sandbox; this
-boundary prevents the game's own secondary instance from using P1's session implicitly.
+A guest has a separate offline profile and can only enter P1's current integrated world through
+the mod's reserved memory pipe. Mod-owned Setup and Profiles are not the stock title or server
+list. A guest never enters those screens, Realms, friends/social, another world, or LAN/integrated
+hosting. Guard the underlying entry points as well as the UI. Block guest social dispatch before
+it starts a worker; a game-thread seat check cannot guard a worker's process-global account read.
+Refuse guest TCP connections and return `None` from `Game::auth()` for a secondary, including
+when the stock local-session initializer asks. The guest session also receives `None` explicitly.
+Leaving the host's world, or losing its connection, disposes of the guest and lease; no stock
+leave-to-title path runs for it.
 
-The engine owns `seat()` as the current local-player index (0 when playing alone). It scopes the
-index from the instance for construction, frame, tick, window events and settings-store load/save,
-restoring the previous index on return. That covers copying P1's profile defaults and then
-loading the guest's own stores outside its first frame. The native wrapper never calls
-`engine::set_seat`. See the [general input spec](https://github.com/sunrise-org/sunrise/issues/2498).
+Fullscreen, process quit and signals, audio, activity, crash details and once-per-client work stay
+with P1. A guest may act only on a window it actually owns. The engine owns `seat()`; the mod
+depends on the general turn and settings-store scope in the
+[input spec](https://github.com/sunrise-org/sunrise/issues/2498). The mod never calls
+`engine::set_seat`. If the signed SDK cannot provide that scope, guest turns do not ship.
 
-### Existing call sites to audit
+### Native replacement checklist
 
-Engine baseline: `817fe45`. Paths below are relative to `crates/sunrise-client/src` unless named
-otherwise. These are responsibilities to preserve or move, not new public hooks.
+Candidate sites from Sunrise `817fe45`, not implemented or compiled by this foundation PR. Paths
+start at `crates/sunrise-client/src/`; targets start at `sunrise_client::`. W means `WRAP_OPERATION`
+with the named call selector; H means a cancellable `HEAD` on the named function, with no call
+selector. Confirm the targets and exact match counts against the cutover SDK. Do not start guests
+if a required patch is missing. At each SDK update, also audit newly reachable calls: an old
+selector still matching does not prove that no new guest path reaches an account service.
 
-| Responsibility | Baseline sites | Boundary at cutover |
-| --- | --- | --- |
-| Primary sign-in bootstrap and chat-key preparation | `game/runtime/launch_options.rs:133–138`; `sunrise-client-render/src/auth.rs:126–134,470` | Consume the launcher's account only at primary bootstrap. Pass the instance account onward. |
-| Remote/replay identity, skin/profile and signed chat | `game.rs:1109`; `game/network/remote/mod.rs:990,1298,2089–2094,5477`; `game/network/remote_chat.rs:185,203,215` | Use the instance account only, including for profile lookup and key selection. Never use P1's keys on a guest path. |
-| Title status and notices, Realms, social requests, world/LAN host identity | `title.rs:2392,3557–3586`; `realms.rs:164–166`; `sunrise-client-render/src/social/service.rs:82–93`; `game/runtime/client_tick_steps.rs:17–18`; `game/world/integrated.rs:464–479`; `lan/mod.rs:208–216` | Do not read P1's account on a secondary path. Keep process-wide account notices and social work on the primary; use explicit account/authority at any shared entry. |
-| Quit, save on process stop, crash and server report | `game/world/world_session.rs:21–29`; `game/runtime/control.rs:1369–1379`; `game/runtime/window_handler.rs:259–270`; `game.rs:9473`; `game/world/saving.rs:260`; `game/world/integrated.rs:1523–1539`; `game/network/remote/mod.rs:982–986,1598–1600` | Closing a secondary leaves only that instance. Primary owns process shutdown, owner-world crash exit and process-level server crash details. |
-| One-time client lifecycle, registrations and config watcher | `game/runtime/launch_options.rs:93–95`; `game/runtime/loading_screen.rs:29–32,44–47`; `game/runtime/window_handler.rs:252–254`; `game/modding/initial_client_models.rs:5`; `game/modding/native_configs.rs:188–202`; `game/runtime/activity.rs:17–18` | Process-level client initialization and shutdown run once for the primary, not once per local view. Per-instance session/events remain per instance. |
-| Process audio, presence and telemetry | `game/interface/music.rs:14–24`; `game/interface/options.rs:652–658`; `game/interface/startup_menu.rs:493`; `game/runtime/activity.rs:23–28`; `game/world/world_session.rs:195–199`; `sunrise-discord/src/lib.rs:92–99` | Primary controls music, mixer volumes, narrator settings, presence and the process telemetry report. |
-| Window observation, fullscreen, pointer and frame ownership | `game/interface/options.rs:565–569,720–755,810–813`; `game/interface/pointer_capture.rs:274`; `game/runtime/window_handler.rs:461–471`; `game/interface/render_settings.rs:58–63`; `game.rs:7502` | Preserve actual window ownership and input focus. A view must not reconfigure a surface or pace frames it does not own. Keep detached-window behavior in the wrapper. |
-| Shared cache and seat-local state | `game/world/world_update.rs:61–75`; `game/runtime/split/players.rs:128–142,311–330`; `sunrise-client-render/src/settings.rs:344–350`; `sunrise-hooks/src/lib.rs:230–246` | Do not let a secondary write the primary's persistent server terrain cache. Load and save stores under the intended instance index. |
+| Sites | Target, file:line and selector |
+| ---: | --- |
+| 2 | `game::loading_screen::run_event_loop` (`game/runtime/loading_screen.rs:36`) and `game::resource_loader::run_loading` (`game/runtime/resource_loader.rs:295`): W `EventLoop::new()?.run_app` in each. |
+| 3 | `game::options::Game::{apply_fullscreen,observe_fullscreen,toggle_fullscreen}` (`game/interface/options.rs:565,720,739`): H each, skip shared-window writes/observation for the secondary. |
+| 4 | `game::Game::render_with` (`game.rs:8154`): W `self.follow_frame`; `game::options::Game::apply_ui_settings` (`game/interface/options.rs:647`): W `r.update_output`; `game::options::Game::limit_frame` (`:810`): H; `game::pointer_capture::Game::internal_grab` (`game/interface/pointer_capture.rs:273`): H. |
+| 4 | `game::saving::Game::begin_closing_save` (`game/world/saving.rs:44`): H for guest `quit`; `game::native_hooks::shared::Game::show_title` (`game/native_hooks/shared.rs:362`): H, refuse stock title installation and detach; `game::window_handler::Game::idle` (`game/runtime/window_handler.rs:261`): W `sunrise_threads::stop_requests`; `game::integrated::Game::exit_after_server_crash` (`game/world/integrated.rs:1523`): H, not a wrap of the `!`-returning exit. |
+| 4 | `game::loading_window::start_game` (`game/runtime/loading_window.rs:406,408`): W `game.publish_initial_client_models` and `game.native_configs_client_start`; `game::client_tick_steps::Game::client_tick_steps` (`game/runtime/client_tick_steps.rs:43`): W `self.native_configs_tick_client`; `game::window_handler::Game::shut_down` (`game/runtime/window_handler.rs:253`): W `self.native_client_stopping`. |
+| 6 | `game::client_tick_steps::Game::client_tick_steps` (`game/runtime/client_tick_steps.rs:50`): W `self.tick_music`; `game::options::Game::apply_ui_settings` (`game/interface/options.rs:597,598,656,658`): W `sunrise_client::parallel::set_setting`, `sunrise_client_render::mipmap::set_dither_cutouts`, `sunrise_client::settings::set_source_volumes`, `super::narrator::sync`; `game::startup_menu::Game::apply_menu_settings` (`game/interface/startup_menu.rs:493`): W `super::narrator::sync`. |
+| 4 | `game::activity::Game::report_activity` (`game/runtime/activity.rs:28`): W `sunrise_hooks::engine::activity`; `game::client_tick_steps::Game::client_tick_steps` (`game/runtime/client_tick_steps.rs:17–18`): W `sunrise_client::social::set_presence_status` and `sunrise_client::social::tick`; `game::world_session::Game::finish_perf` (`game/world/world_session.rs:195`): H. |
+| 1 | `game::remote::Game::leave_server` (`game/network/remote/mod.rs:1530`): H, schedule guest disposal instead of stock leave-to-title. This skips `clear_detail` at `:1599` and title construction at `:1626–1645`; `set_detail` at `:983` is excluded by the no-TCP gate below. |
+| 4 | `game::remote::Game::connect_remote_session` (`game/network/remote/mod.rs:954`): H, refuse TCP for secondaries before reading identity; `game::world_session::Game::open_world` (`game/world/world_session.rs:86`): H before filesystem work; `game::integrated::Game::open_integrated` (`game/world/integrated.rs:464`): H before auth/server worker creation; `game::lan::Game::lan_open` (`game/network/lan/mod.rs:1181`): H. |
+| 2 | `game::startup_menu::Game::draw_menu` (`game/interface/startup_menu.rs:1397`) and `game::native_hooks::shared::Game::settle_title_toasts` (`game/native_hooks/shared.rs:865`): W `title.poll_backup` in each. Mod never routes secondary input to stock Title/Realms; use its own setup screen. |
+| 2 | `game::world_update::Game::prepare_lod` (`game/world/world_update.rs:74`): W `std::env::current_dir`, short-circuit only the guest persistent-cache path; `game::options::Game::options_path` (`game/interface/options.rs:98`): H returning the scoped guest path, guard construction as well. |
+| 1 | `game::remote::Game::auth` (`game/network/remote/mod.rs:2089–2094`): H returns `None` for the scoped secondary. P1's ordinary auth path stays untouched. |
+
+**Deferred, only if guests ever get online features:** give each `Game` its own optional account,
+attach the launcher account only at primary construction, and remove the process fallback from
+`Game::auth()`. Audit direct global readers as part of that work. Do not build or require this
+engine change for memory-only guests.
 
 ## Remove the built-in implementation
 
@@ -101,12 +113,17 @@ git ls-files crates launcher | grep -iE "$pattern"
 
 - Without the mod: unchanged solo and headless play, no work allocated to extra views. With the
   mod: both windowed starts, closed and published worlds, the shared eight-player boundary under
-  the current default, pause and resume, title/world transitions, profile and focus behavior,
+  the current default, pause and resume, leaving the host world, profile and focus behavior,
   2 and 4 seats, resize, monitor changes and device loss. Exercise 16 views in layout only.
-- With P1 signed in, assert the secondary's `auth()` and memory session have no account. Attempt
-  Realms and remote multiplayer from its title: no P1 identity, credentials, chat signing or
-  account-specific request. Guests changing fullscreen, audio, or quitting must not resize P1's
-  window, change the process mixer or end the game. Verify guest settings affect only its profile.
+- On the exact signed SDK with the startup fix, run both windowed paths with P1 signed in. Prove
+  guest auth is absent for the reserved memory connection. Drive guest input and direct entry
+  attempts for the stock title, server list/TCP, Realms, friends/social, world open, integrated
+  hosting and LAN opening. No screen, request or account worker may start. Close the host world
+  and force a lost guest connection; in both cases the affected guest is destroyed, not taken
+  to a title screen. Verify no guest attempt uses P1's name, account or chat key.
+- On both starts, prove P1 can still sign in, open Realms and use signed online chat. Verify guest
+  fullscreen, audio and quit do not resize P1's window, change the process mixer or end the game;
+  lifecycle and signals remain primary-only. Guest settings affect only its profile.
 - On the same hardware, scene, settings and render resolution, use the existing performance
   platform to collect total frame time p50/p99 and CPU and GPU frame time p50. Repeat captures to
   establish the run-to-run noise band. The candidate without the mod must stay within that band
