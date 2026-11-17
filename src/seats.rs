@@ -105,7 +105,7 @@ impl Seats {
             .as_ref()
             .and_then(|tickets| tickets.get(&uuid)?.upgrade());
         match (connection, reserved) {
-            (Connection::Network, None) => Decision::Stock,
+            (Connection::Network | Connection::Memory(None), None) => Decision::Stock,
             (Connection::Memory(Some(presented)), Some(ticket))
                 if std::ptr::eq(presented, ticket.as_ref())
                     && ticket.name == name
@@ -188,7 +188,7 @@ mod tests {
         drop(reserved);
         assert_eq!(
             seats.decide(Connection::Memory(None), 2, "Guest", false, now),
-            Decision::Deny
+            Decision::Stock
         );
         let next = guest(now, "Guest", 2);
         assert!(seats.reserve(&next, false, []));
@@ -201,7 +201,7 @@ mod tests {
     }
 
     #[test]
-    fn owner_lan_and_stock_seats_are_left_to_the_existing_policy() {
+    fn owner_ordinary_connections_and_stock_seats_are_left_to_the_existing_policy() {
         let now = Instant::now();
         let mut seats = Seats::new("Owner".into(), 1, 1);
         let reserved = guest(now, "Guest", 2);
@@ -212,6 +212,10 @@ mod tests {
         );
         assert_eq!(
             seats.decide(Connection::Network, 3, "OrdinaryLan", false, now),
+            Decision::Stock
+        );
+        assert_eq!(
+            seats.decide(Connection::Memory(None), 4, "OrdinaryLocal", false, now),
             Decision::Stock
         );
         assert_eq!(

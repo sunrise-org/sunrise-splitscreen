@@ -7,13 +7,13 @@ use std::{
     time::{Duration, Instant},
 };
 use sunrise_client::lan::{
-    NetConfig,
+    MAX_PLAYERS, NetConfig,
     conn::{MEMORY_ADDRESS, serve_local, valid_name},
 };
 use sunrise_protocol::{connection::Pipe, crypto::offline_uuid, text::translatable};
 
 const HANDSHAKE_TIMEOUT: Duration = Duration::from_secs(30);
-const MAX_GUESTS: usize = sunrise_client::split_layout::MAX_PLAYERS - 1;
+const MAX_GUESTS: usize = MAX_PLAYERS - 1;
 type StockSeat = Arc<dyn Fn(u128) -> bool + Send + Sync>;
 
 pub(crate) struct Gate {
