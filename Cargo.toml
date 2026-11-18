@@ -1,0 +1,9 @@
+[package]
+name = "mod-splitscreen"
+version = "0.1.0"
+edition = "2024"
+license-file = "LICENSE"
+publish = false
+
+[dependencies]
+sunrise-mod-api = { path = ".sunrise/sdk/api/crates/sunrise-mod-api" }
