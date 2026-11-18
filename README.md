@@ -21,4 +21,14 @@ GitHub-hosted runner even when the pool lease is active. These builds are not pl
 and signed, each version goes through the normal [sunrise-mods](https://github.com/sunrise-org/sunrise-mods#submitting-a-project)
 submission process.
 
+## Verifying releases
+
+Release packages are signed with Sunrise's official-mod key, [`minisign.pub`](minisign.pub) (key ID `69DA4581EF8B9FDA`). Download `splitscreen.smod` and its `splitscreen.smod.minisig` from the same release into one folder, then run:
+
+```sh
+minisign -Vm splitscreen.smod -p minisign.pub
+```
+
+Once the mod is listed in Sunrise's registry, its entry pins this key, and the launcher refuses a registry install whose signature doesn't verify against it.
+
 Licence: [MIT](LICENSE). See [CONTRIBUTING.md](CONTRIBUTING.md) for the DCO sign-off.
