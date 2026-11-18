@@ -48,6 +48,11 @@ jobs:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
         with:
           persist-credentials: false
+      - name: Install the game's link libraries on a GitHub-hosted runner
+        if: needs.route.outputs.runner == 'ubuntu-latest'
+        run: |
+          sudo apt-get update -q
+          sudo apt-get install -yq --no-install-recommends libasound2-dev libudev-dev
       - name: Check and package against the signed Sunrise SDK
         id: sdk
         env:
