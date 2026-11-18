@@ -30,9 +30,10 @@ enum Phase {
         session: Session,
     },
     Playing {
-        _lease: Arc<mod_splitscreen::seats::Ticket>,
-        _session: Session,
+        lease: Arc<mod_splitscreen::seats::Ticket>,
+        session: Session,
     },
+    PlayingConflict(Session),
     Dropped,
     Replay(Session),
     Passed,
@@ -136,18 +137,24 @@ impl Probe {
                     }
                 }
                 if joined {
-                    Phase::Playing {
-                        _lease: lease,
-                        _session: session,
-                    }
+                    Phase::Playing { lease, session }
                 } else {
                     Phase::Joining { lease, session }
                 }
             }
-            Phase::Playing { .. } if roster() == Some((true, true)) => {
+            Phase::Playing { lease, session } if roster() == Some((true, true)) => {
                 eprintln!("admission fixture: both players online, no guest operator grant");
-                Phase::Dropped // drops the client session and lease together
+                // Keep the player online but remove the lease so only the roster can reject
+                // the new reservation.
+                drop(lease);
+                assert!(self.seats.request(game, NAME.into()));
+                Phase::PlayingConflict(session)
             }
+            Phase::PlayingConflict(session) => match self.seats.next_ready() {
+                Some(None) => Phase::Dropped,
+                Some(Some(_)) => panic!("the playing guest's UUID reserved another seat"),
+                None => Phase::PlayingConflict(session),
+            },
             Phase::Dropped if roster() == Some((true, false)) => Phase::Replay(unreserved()),
             Phase::Replay(session) => {
                 if refused(&session) {

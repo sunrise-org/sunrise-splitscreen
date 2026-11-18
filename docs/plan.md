@@ -17,9 +17,10 @@ Drop the temporary stock-seat exception when moving to an SDK without the built-
 
 1. **Admission and SDK checks.** Reserve one exact in-process pipe for one validated offline UUID
    and name. Only that pipe may use its single-use ticket, which expires with the request, view, or
-   world. With no reservation and no ticket, defer to the game's own login gate, including its
-   published-world policy. Never admit a ticket over TCP, pass P1's credentials, assign an operator
-   level, or change ordinary LAN permissions. Our provisional default, not a cap decided by
+   world. Refuse an issued pipe if its lease is gone. With no reservation, a genuinely untagged
+   connection goes through the game's own login gate, including its published-world policy.
+   Never admit a ticket over TCP, pass P1's credentials, assign an operator level, or change
+   ordinary LAN permissions. Our provisional default, not a cap decided by
    Umut, is the existing eight-player hub cap for P1, local seats and LAN guests together.
    Sixteen views are a layout test only. If Sunrise instead adopts a generic network cap that
    excludes in-process connections, revisit the gameplay cap and the device bus table size
@@ -28,6 +29,14 @@ Drop the temporary stock-seat exception when moving to an SDK without the built-
    a live lease on eligible events, or a GitHub-hosted runner otherwise. After this workflow
    reaches the default branch, dispatch `.github/workflows/build.yml` once with `force_hosted: true`
    and record the hosted build result. Ordinary lease routing stays unchanged.
+
+   The mod refuses conflicts with playing guests when issuing a seat reservation; the smoke tests
+   this after dropping a guest's lease while keeping the guest online. The pinned SDK cannot guarantee
+   refusal of a UUID held by a login still in configuration. The stock gate runs before the engine
+   claims the UUID, and the roster is populated after configuration. A published-world login can
+   therefore pass the stock gate before the seat reserves the same UUID, and the seat can hit the
+   stock duplicate-kick path. Do not ship guest admission until a general native route can refuse
+   that conflict where the engine claims the UUID, without changing ordinary duplicate policy.
 2. **Compose without replacing startup.** Wrap the two `run_app` calls with `WRAP_OPERATION` once a
    signed SDK carries the general [`?` receiver fix](https://github.com/sunrise-org/sunrise/pull/2521).
    Delegate P1 to the plain `Game`; the wrapper owns the other `Game` instances, offscreen views
