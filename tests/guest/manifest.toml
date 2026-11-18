@@ -1,0 +1,182 @@
+
+# Development fixture only, on the signed pin before built-in splitscreen is removed.
+[[native.module]]
+id = "guest-fixture-app"
+file = "crates/sunrise-client/src/game/runtime/loading_screen.rs"
+name = "splitscreen_app"
+source = "src/guest/app.rs"
+
+[[native.module]]
+id = "guest-fixture-view"
+file = "crates/sunrise-client/src/game/runtime/loading_screen.rs"
+name = "splitscreen_view"
+source = "src/guest/view.rs"
+
+[[native.mixin]]
+id = "guest-fixture-direct"
+target = "sunrise_client::game::loading_screen::run_event_loop"
+kind = "OVERWRITE"
+helper = "src/guest/direct.rs"
+bindings = [{ name = "game", ty = "Game<'_>", value = "game" }]
+
+[[native.mixin]]
+id = "guest-fixture-loading"
+target = "sunrise_client::game::resource_loader::run_loading"
+kind = "OVERWRITE"
+helper = "src/guest/loading.rs"
+bindings = [
+  { name = "options", ty = "Options", value = "options" },
+  { name = "settings", ty = "Settings", value = "settings" },
+  { name = "vanilla_root", ty = "PathBuf", value = "vanilla_root" },
+  { name = "pack_error", ty = "Option<String>", value = "pack_error" },
+  { name = "started", ty = "Instant", value = "started" },
+]
+
+[[native.mixin]]
+id = "guest-fixture-presence"
+target = "sunrise_client::game::client_tick_steps::Game::client_tick_steps"
+kind = "WRAP_OPERATION"
+selector = "sunrise_client::social::set_presence_status"
+require = 1
+ordinal = 0
+helper = "src/guest/presence.rs"
+bindings = [
+  { name = "status", ty = "sunrise_client::social::PresenceStatus", value = "$arg0" },
+  { name = "set", ty = "impl FnOnce(sunrise_client::social::PresenceStatus) -> ()", value = "$operation" },
+]
+
+[[native.mixin]]
+id = "guest-fixture-social"
+target = "sunrise_client::game::client_tick_steps::Game::client_tick_steps"
+kind = "WRAP_OPERATION"
+selector = "sunrise_client::social::tick"
+require = 1
+ordinal = 0
+helper = "src/guest/social.rs"
+bindings = [{ name = "tick", ty = "impl FnOnce() -> ()", value = "$operation" }]
+
+[[native.mixin]]
+id = "guest-fixture-no-skin-downloads"
+target = "sunrise_client::game::remote::Game::update_remote_skins"
+kind = "HEAD"
+cancellable = true
+helper = "src/guest/local_only.rs"
+
+[[native.mixin]]
+id = "guest-fixture-no-profile-lookups"
+target = "sunrise_client::game::remote::Game::resolve_inline_profiles"
+kind = "HEAD"
+cancellable = true
+helper = "src/guest/local_only.rs"
+
+[[native.mixin]]
+id = "guest-fixture-no-item-profile-lookups"
+target = "sunrise_client::game::item_draw::<Host as SpecialHost>::player_skin"
+kind = "HEAD"
+cancellable = true
+helper = "src/guest/no_skin.rs"
+
+[[native.mixin]]
+id = "guest-fixture-ui-settings"
+target = "sunrise_client::game::options::Game::apply_ui_settings"
+kind = "HEAD"
+cancellable = true
+helper = "src/guest/local_only.rs"
+
+[[native.mixin]]
+id = "guest-fixture-fullscreen-observe"
+target = "sunrise_client::game::options::Game::observe_fullscreen"
+kind = "HEAD"
+cancellable = true
+helper = "src/guest/local_only.rs"
+
+[[native.mixin]]
+id = "guest-fixture-fullscreen-key"
+target = "sunrise_client::game::options::Game::toggle_fullscreen"
+kind = "HEAD"
+cancellable = true
+helper = "src/guest/local_only.rs"
+
+[[native.mixin]]
+id = "guest-fixture-title"
+target = "sunrise_client::game::native_hooks::Game::show_title"
+kind = "HEAD"
+cancellable = true
+helper = "src/guest/local_only.rs"
+
+[[native.mixin]]
+id = "guest-fixture-activity"
+target = "sunrise_client::game::activity::Game::report_activity"
+kind = "HEAD"
+cancellable = true
+helper = "src/guest/local_only.rs"
+
+[[native.mixin]]
+id = "guest-fixture-configs"
+target = "sunrise_client::game::native_configs::Game::native_configs_tick_client"
+kind = "HEAD"
+cancellable = true
+helper = "src/guest/local_only.rs"
+
+[[native.mixin]]
+id = "guest-fixture-music"
+target = "sunrise_client::game::music::Game::tick_music"
+kind = "HEAD"
+cancellable = true
+helper = "src/guest/local_only.rs"
+
+[[native.mixin]]
+id = "guest-fixture-telemetry"
+target = "sunrise_client::game::world_session::Game::finish_perf"
+kind = "HEAD"
+cancellable = true
+helper = "src/guest/local_only.rs"
+
+[[native.mixin]]
+id = "guest-fixture-world"
+target = "sunrise_client::game::world_session::Game::open_world"
+kind = "HEAD"
+cancellable = true
+helper = "src/guest/deny.rs"
+
+[[native.mixin]]
+id = "guest-fixture-lan"
+target = "sunrise_client::game::lan::Game::lan_open"
+kind = "HEAD"
+cancellable = true
+helper = "src/guest/deny.rs"
+
+[[native.mixin]]
+id = "guest-fixture-auth"
+target = "sunrise_client::game::remote::Game::auth"
+kind = "HEAD"
+cancellable = true
+helper = "src/guest/no_auth.rs"
+
+[[native.mixin]]
+id = "guest-fixture-tcp"
+target = "sunrise_client::game::remote::Game::connect_remote_session"
+kind = "HEAD"
+cancellable = true
+helper = "src/guest/join.rs"
+bindings = [
+  { name = "local", ty = "&Option<sunrise_protocol::connection::Pipe>", value = "&local" },
+  { name = "lan", ty = "bool", value = "lan" },
+  { name = "realm", ty = "bool", value = "realm" },
+]
+
+[[native.mixin]]
+id = "guest-fixture-quit"
+target = "sunrise_client::game::saving::Game::begin_closing_save"
+kind = "HEAD"
+cancellable = true
+helper = "src/guest/disconnect.rs"
+bindings = [{ name = "guest", ty = "&mut Game<'_>", value = "self" }]
+
+[[native.mixin]]
+id = "guest-fixture-leave"
+target = "sunrise_client::game::remote::Game::leave_server"
+kind = "HEAD"
+cancellable = true
+helper = "src/guest/disconnect.rs"
+bindings = [{ name = "guest", ty = "&mut Game<'_>", value = "self" }]
