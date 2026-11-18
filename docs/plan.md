@@ -1,9 +1,11 @@
 # Replacing the built-in splitscreen
 
-**Route M: one process, one window, no engine changes.** Use the mod API and native mixins on the
-prebuilt game. The mod owns guest instances and their composition; it does not add a factory,
-an account or process role, or a splitscreen-specific extension point. Start with two local players in one
-window. Ship only the exact SDK builds on which containment and primary behavior are verified.
+**Route M: one process, one window, no splitscreen code in the engine.** Use the mod API and
+native mixins on the prebuilt game. The mod owns guest instances and their composition. It adds
+no factory, account or process role, or feature-specific extension point. The only new field on
+`Game` this plan requires is the neutral local-instance index from #2498 step 13. That work is
+owned by #2498, not splitscreen. Start with two local players in one window. Ship only the exact
+SDK builds on which containment and primary behavior are verified.
 
 The pinned signed SDK still contains built-in splitscreen, but Sunrise is removing it now from
 its engine, mod API and launcher, ahead of mod parity. Splitscreen will be unavailable on those
@@ -30,8 +32,8 @@ Drop the temporary stock-seat exception when moving to an SDK without the built-
    signed SDK carries the general [`?` receiver fix](https://github.com/sunrise-org/sunrise/pull/2521).
    Delegate P1 to the plain `Game`; the wrapper owns the other `Game` instances, offscreen views
    and composition. Leave stock loading, reporting and shutdown alone; headless does not use
-   winit. No app factory or splitscreen-specific hook, registry, or field on `Game`. The mod uses
-   the general local-instance index, once #2498 supplies it.
+   winit. No app factory or splitscreen-specific hook, registry or `Game` field. The only new
+   `Game` field used is #2498's neutral local-instance index.
 3. **Move the player-facing behavior.** The mod owns view and monitor layout, joining and leaving,
    seat HUD, setup, profile storage and per-view focus. Its native window path draws existing
    vanilla widgets before and after world entry. Keep profile drafts separate and reject names
@@ -113,9 +115,9 @@ stock-seat exception and any other dependency on the old implementation.
 
 | Area | Remove or move to the mod | Keep or generalize |
 | --- | --- | --- |
-| Startup and client | `game/runtime/split/`, `mod split`, its direct and loading startup branches, `split_guest`, `split_auth`, `split_window`, `split_in_main_window`, `paced_by_split`, `split_hud` and the split-only title/menu/pad branches. | Both windowed starts and the loading handoff own a plain `Game`. Preserve solo, offscreen and headless behavior with the instance boundary above. Shift ordinary controller notices out of the split HUD. |
+| Startup and client | `game/runtime/split/`, `mod split`, its direct and loading startup branches, `split_guest`, `split_auth`, `split_window`, `split_in_main_window`, `paced_by_split`, `split_hud` and the split-only title/menu/pad branches. | Both windowed starts and the loading handoff own a plain `Game`. Preserve #2498's neutral local-instance index and solo, offscreen and headless behavior. Shift ordinary controller notices out of the split HUD. |
 | Render, settings and UI | Move `split_layout`, `split_map`, `split_profiles` and `split_ui`. Remove re-exports, `Page::SplitSetup`, `split_setup`, `FrameDraw::SplitHelp`, `SPLIT_SETTINGS`, `open_split_settings`, `SPLIT_TWO`, `SPLIT_THREE`, split-only option pages, labels and flags. Move or retire `sunrise.split.*` and `sunrise.pages.{open.,}split_*` locale keys. | Keep `gfx/compositor.rs` as a blit/composition primitive for offscreen views, with neutral docs, labels and errors. Preserve vanilla widgets and ordinary controller notices. |
-| Audio | Remove built-in feature wording from `sunrise-client-render/src/audio.rs`. | Keep `Audio::share`, `listeners`, `cameras`, the nearest-listener rule and the halved panning with more than one camera. The mod uses this general multi-listener mixer; document it without feature-specific terms. |
+| Audio (`sunrise-client-render/src/audio.rs`) | Remove only built-in feature wording. | **Kept: the generic multi-listener mixer.** Retain `Audio::share`, `listeners`, `cameras`, the nearest-listener rule and the halved panning with more than one camera. The mod uses these behaviors; document them without feature-specific terms. |
 | Integrated world | Remove `Flags::split_players`, `Integrated::{join_split, leave_split, has_split_players}`, the `owner_link.rs` split requests and handlers, inherited ops, `bypasses_limit` for seats, the `split_seat` gate branch, and the split-specific pause rule. | Keep memory-only owner login and the ordinary LAN gate. While another local client is active the mod keeps the world ticking, then lets stock pause policy resume. If pipe binding still uses the mod's worker adapter, require each SDK bump to check the signed `Lan::connect_local` and `serve_local` sources; fail on changes until the adapter is re-audited and both smokes pass. Do not add a feature-specific token. |
 | Hooks and shared state | Remove built-in splitscreen assumptions from `sunrise-hooks` seat/page docs and mod-vocab client-session, lifecycle and frame-hook docs. Audit shared input, HUD and presence code. | Use the engine-owned local instance index for existing per-view stores, pages and rendering. Preserve the hook contracts. |
 | Launcher | Remove the `SUNRISE_ACCOUNT_SESSIONS` export, its split-session list and renewal, `GameSession.env` plumbing used only for it, both defensive scrubs and related tests at cutover. | Preserve primary sign-in, renewal and session transport. Before removing the scrubs, prove old supported launch targets cannot inherit stale extra-account credentials; if that cannot be proven, block this step pending a general launch-environment fix. |
