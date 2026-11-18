@@ -21,4 +21,4 @@ GitHub-hosted runner even when the pool lease is active. These builds are not pl
 and signed, each version goes through the normal [sunrise-mods](https://github.com/sunrise-org/sunrise-mods#submitting-a-project)
 submission process.
 
-Licence: [PolyForm Shield 1.0.0](LICENSE). See [CONTRIBUTING.md](CONTRIBUTING.md) for the DCO sign-off.
+Licence: [MIT](LICENSE). See [CONTRIBUTING.md](CONTRIBUTING.md) for the DCO sign-off.
