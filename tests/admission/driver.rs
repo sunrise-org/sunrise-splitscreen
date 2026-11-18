@@ -20,6 +20,7 @@ enum Phase {
     #[default]
     Waiting,
     Requested,
+    Duplicate(SeatPipe),
     Impostor {
         reserved: SeatPipe,
         session: Session,
@@ -87,24 +88,26 @@ impl Probe {
             Phase::Waiting if roster() == Some((true, false)) => {
                 assert!(!self.seats.request(game, "Invalid name".into()));
                 assert!(self.seats.request(game, NAME.into()));
-                assert!(self.seats.request(game, NAME.to_ascii_lowercase()));
                 Phase::Requested
             }
             Phase::Requested => match self.seats.next_ready() {
-                Some(Some(reserved)) => Phase::Impostor {
-                    reserved,
-                    session: unreserved(),
-                },
+                Some(Some(reserved)) => {
+                    assert!(self.seats.request(game, NAME.to_ascii_lowercase()));
+                    Phase::Duplicate(reserved)
+                }
                 Some(None) => panic!("first request was refused"),
                 None => Phase::Requested,
             },
+            Phase::Duplicate(reserved) => match self.seats.next_ready() {
+                Some(None) => Phase::Impostor {
+                    reserved,
+                    session: unreserved(),
+                },
+                Some(Some(_)) => panic!("the same name in another case reserved a second seat"),
+                None => Phase::Duplicate(reserved),
+            },
             Phase::Impostor { reserved, session } => {
                 if refused(&session) {
-                    let duplicate = self.seats.next_ready().expect("second request completed");
-                    assert!(
-                        duplicate.is_none(),
-                        "the same name in another case reserved a second seat"
-                    );
                     eprintln!("admission fixture: wrong pipe and duplicate name refused");
                     Phase::Joining {
                         lease: reserved.lease,
