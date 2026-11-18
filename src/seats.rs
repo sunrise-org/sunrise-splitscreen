@@ -27,9 +27,17 @@ impl Ticket {
     }
 }
 
+#[derive(Clone, Copy)]
 pub enum Connection<'a> {
     Network,
-    Memory(Option<&'a Ticket>),
+    Memory,
+    Seat(&'a Weak<Ticket>),
+}
+
+impl<'a> Connection<'a> {
+    pub fn memory(issued: Option<&'a Weak<Ticket>>) -> Self {
+        issued.map_or(Self::Memory, Self::Seat)
+    }
 }
 
 #[derive(Debug, PartialEq, Eq)]
@@ -96,7 +104,7 @@ impl Seats {
     ) -> Decision {
         if stock_seat || uuid == self.owner {
             return match connection {
-                Connection::Memory(Some(_)) => Decision::Deny,
+                Connection::Seat(_) => Decision::Deny,
                 _ => Decision::Stock,
             };
         }
@@ -105,9 +113,9 @@ impl Seats {
             .as_ref()
             .and_then(|tickets| tickets.get(&uuid)?.upgrade());
         match (connection, reserved) {
-            (Connection::Network | Connection::Memory(None), None) => Decision::Stock,
-            (Connection::Memory(Some(presented)), Some(ticket))
-                if std::ptr::eq(presented, ticket.as_ref())
+            (Connection::Network | Connection::Memory, None) => Decision::Stock,
+            (Connection::Seat(presented), Some(ticket))
+                if std::ptr::eq(presented.as_ptr(), Arc::as_ptr(&ticket))
                     && ticket.name == name
                     && now < ticket.deadline
                     && !ticket.used.swap(true, Ordering::Relaxed) =>
@@ -138,46 +146,44 @@ mod tests {
         let mut seats = Seats::new("Owner".into(), 1, 15);
         let reserved = guest(now, "Guest", 2);
         let other = guest(now, "Guest", 2);
+        let issued = Connection::Seat(&Arc::downgrade(&reserved));
         assert!(seats.reserve(&reserved, false, []));
         assert_eq!(
-            seats.decide(Connection::Memory(None), 2, "Guest", false, now),
+            seats.decide(Connection::Memory, 2, "Guest", false, now),
             Decision::Deny
         );
         assert_eq!(
-            seats.decide(Connection::Memory(Some(&other)), 2, "Guest", false, now),
+            seats.decide(
+                Connection::Seat(&Arc::downgrade(&other)),
+                2,
+                "Guest",
+                false,
+                now
+            ),
             Decision::Deny
         );
-        assert_eq!(
-            seats.decide(Connection::Memory(Some(&reserved)), 2, "Other", false, now),
-            Decision::Deny
-        );
-        assert_eq!(
-            seats.decide(Connection::Memory(Some(&reserved)), 3, "Guest", false, now),
-            Decision::Deny
-        );
+        assert_eq!(seats.decide(issued, 2, "Other", false, now), Decision::Deny);
+        assert_eq!(seats.decide(issued, 3, "Guest", false, now), Decision::Deny);
         assert_eq!(
             seats.decide(Connection::Network, 2, "Guest", false, now),
             Decision::Deny
         );
         assert_eq!(
-            seats.decide(Connection::Memory(Some(&reserved)), 2, "Guest", false, now),
+            seats.decide(issued, 2, "Guest", false, now),
             Decision::Allow
         );
-        assert_eq!(
-            seats.decide(Connection::Memory(Some(&reserved)), 2, "Guest", false, now),
-            Decision::Deny
-        );
+        assert_eq!(seats.decide(issued, 2, "Guest", false, now), Decision::Deny);
     }
 
     #[test]
-    fn expired_dropped_and_closed_reservations_cannot_admit() {
+    fn expired_and_closed_reservations_cannot_admit() {
         let now = Instant::now();
         let mut seats = Seats::new("Owner".into(), 1, 1);
         let reserved = guest(now, "Guest", 2);
         assert!(seats.reserve(&reserved, false, []));
         assert_eq!(
             seats.decide(
-                Connection::Memory(Some(&reserved)),
+                Connection::Seat(&Arc::downgrade(&reserved)),
                 2,
                 "Guest",
                 false,
@@ -185,19 +191,36 @@ mod tests {
             ),
             Decision::Deny
         );
-        drop(reserved);
-        assert_eq!(
-            seats.decide(Connection::Memory(None), 2, "Guest", false, now),
-            Decision::Stock
-        );
-        let next = guest(now, "Guest", 2);
-        assert!(seats.reserve(&next, false, []));
         seats.close();
         assert_eq!(
-            seats.decide(Connection::Memory(Some(&next)), 2, "Guest", false, now),
+            seats.decide(
+                Connection::Seat(&Arc::downgrade(&reserved)),
+                2,
+                "Guest",
+                false,
+                now
+            ),
             Decision::Deny
         );
-        assert!(!seats.reserve(&next, false, []));
+        assert!(!seats.reserve(&reserved, false, []));
+    }
+
+    #[test]
+    fn a_published_world_still_denies_an_issued_pipe_after_revocation() {
+        let now = Instant::now();
+        let mut seats = Seats::new("Owner".into(), 1, 1);
+        let lease = guest(now, "Guest", 2);
+        assert!(seats.reserve(&lease, false, []));
+        let pipe = Arc::downgrade(&lease);
+        drop(lease);
+
+        // The integrated stock gate admits ordinary connections when the world is published.
+        let admitted = |connection| match seats.decide(connection, 2, "Guest", false, now) {
+            Decision::Stock | Decision::Allow => true,
+            Decision::Deny => false,
+        };
+        assert!(admitted(Connection::memory(None)));
+        assert!(!admitted(Connection::memory(Some(&pipe))));
     }
 
     #[test]
@@ -207,7 +230,7 @@ mod tests {
         let reserved = guest(now, "Guest", 2);
         assert!(seats.reserve(&reserved, false, []));
         assert_eq!(
-            seats.decide(Connection::Memory(None), 1, "Owner", false, now),
+            seats.decide(Connection::Memory, 1, "Owner", false, now),
             Decision::Stock
         );
         assert_eq!(
@@ -215,15 +238,21 @@ mod tests {
             Decision::Stock
         );
         assert_eq!(
-            seats.decide(Connection::Memory(None), 4, "OrdinaryLocal", false, now),
+            seats.decide(Connection::Memory, 4, "OrdinaryLocal", false, now),
             Decision::Stock
         );
         assert_eq!(
-            seats.decide(Connection::Memory(None), 2, "Guest", true, now),
+            seats.decide(Connection::Memory, 2, "Guest", true, now),
             Decision::Stock
         );
         assert_eq!(
-            seats.decide(Connection::Memory(Some(&reserved)), 2, "Guest", true, now),
+            seats.decide(
+                Connection::Seat(&Arc::downgrade(&reserved)),
+                2,
+                "Guest",
+                true,
+                now
+            ),
             Decision::Deny
         );
     }

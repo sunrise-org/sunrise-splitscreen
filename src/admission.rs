@@ -27,7 +27,8 @@ thread_local! {
     static SERVER_GATE: RefCell<Weak<Gate>> = const { RefCell::new(Weak::new()) };
     // Only the server thread for the specific pipe opened below carries this token. It is not a
     // login packet field and can't be sent from another memory connection or from the network.
-    static PIPE_TICKET: RefCell<Weak<Ticket>> = const { RefCell::new(Weak::new()) };
+    // Keep the marker on the worker even when the client drops the lease.
+    static PIPE_TICKET: RefCell<Option<Weak<Ticket>>> = const { RefCell::new(None) };
 }
 
 impl Gate {
@@ -45,14 +46,15 @@ impl Gate {
         let admission = Arc::clone(&gate);
         net.gate = Some(Arc::new(move |address, uuid, name| {
             let known_stock_seat = admission.is_stock_seat(uuid);
-            let ticket = PIPE_TICKET.with_borrow(Weak::upgrade);
-            let connection = if address == MEMORY_ADDRESS {
-                Connection::Memory(ticket.as_deref())
-            } else {
-                Connection::Network
-            };
-            let decision = admission.seats.lock().map_or(Decision::Deny, |seats| {
-                seats.decide(connection, uuid, name, known_stock_seat, Instant::now())
+            let decision = PIPE_TICKET.with_borrow(|ticket| {
+                let connection = if address == MEMORY_ADDRESS {
+                    Connection::memory(ticket.as_ref())
+                } else {
+                    Connection::Network
+                };
+                admission.seats.lock().map_or(Decision::Deny, |seats| {
+                    seats.decide(connection, uuid, name, known_stock_seat, Instant::now())
+                })
             });
             match decision {
                 Decision::Stock => original(address, uuid, name),
@@ -112,7 +114,7 @@ impl Gate {
         let shared = Arc::clone(&host.hub.lan.shared);
         let ticket = Arc::downgrade(ticket);
         sunrise_guest_stack::spawn("sunrise-local-conn".into(), move || {
-            PIPE_TICKET.with_borrow_mut(|slot| *slot = ticket);
+            PIPE_TICKET.with_borrow_mut(|slot| *slot = Some(ticket));
             if let Err(error) = serve_local(pipe, shared)
                 && std::env::var_os("SUNRISE_NET_DEBUG").is_some()
             {
