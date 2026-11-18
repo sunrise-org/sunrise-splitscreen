@@ -81,18 +81,30 @@ native_build "$project" "$scratch/package.json"
 package=target/sunrise-mod/splitscreen.smod
 "$tool" sunrise-mod check "$package" --kind native-mod
 
-# Compile the real in-game driver in a separate package; it never ships in the artifact.
-fixture=$scratch/fixture
-mkdir "$fixture"
-cp -a -- "$project/"{Cargo.toml,Cargo.lock,sunrise-mod.toml,src} "$fixture/"
-cat "$root/tests/admission/manifest.toml" >> "$fixture/sunrise-mod.toml"
-cp -- "$root/tests/admission/driver.rs" "$fixture/src/fixture.rs"
-cp -- "$root/tests/admission/mixin.rs" "$fixture/src/mixins/fixture.rs"
-native_build "$fixture" "$scratch/fixture.json"
-echo 'Built the admission smoke fixture against the same prebuilt SDK'
-if [[ -n ${SPLITSCREEN_TEST_RESOURCES:-} ]]; then
-    bash "$root/tools/run-admission-smoke.sh" "$fixture" "$scratch/fixture.json"
-fi
+# Compile the in-game drivers in separate packages; neither ships in the artifact.
+for suite in admission guest; do
+    # The development guest fixture copies the two startup functions on this exact pin only.
+    if [[ "$suite" == guest && "$tag" != sdk-68b51161354df882c903467bd891a7996e08c11f ]]; then
+        echo 'Skipping guest fixture: this SDK has not been audited for guest dispatch'
+        continue
+    fi
+    fixture=$scratch/$suite-fixture
+    mkdir "$fixture"
+    cp -a -- "$project/"{Cargo.toml,Cargo.lock,sunrise-mod.toml,src} "$fixture/"
+    cat "$root/tests/$suite/manifest.toml" >> "$fixture/sunrise-mod.toml"
+    if [[ "$suite" == admission ]]; then
+        cp -- "$root/tests/admission/driver.rs" "$fixture/src/fixture.rs"
+        cp -- "$root/tests/admission/mixin.rs" "$fixture/src/mixins/fixture.rs"
+    else
+        mkdir "$fixture/src/guest"
+        cp -- "$root/tests/guest/"*.rs "$fixture/src/guest/"
+    fi
+    native_build "$fixture" "$fixture/result.json"
+    echo "Built the $suite smoke fixture against the same prebuilt SDK"
+    if [[ -n ${SPLITSCREEN_TEST_RESOURCES:-} ]]; then
+        bash "$root/tools/run-smoke.sh" "$suite" "$fixture" "$fixture/result.json"
+    fi
+done
 
 mkdir -p "$root/target/$tag"
 cp -- "$package" "$root/target/$tag/"

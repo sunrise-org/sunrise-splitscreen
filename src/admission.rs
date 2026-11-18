@@ -144,15 +144,17 @@ pub(crate) struct SeatPipe {
 }
 
 impl WorldSeats {
-    pub(crate) fn track(&mut self, game: &Game<'_>) {
+    pub(crate) fn track(&mut self, game: &Game<'_>) -> bool {
         let world = game.integrated.as_ref().filter(|world| !world.stopped());
-        if !world.is_some_and(|world| std::ptr::eq(Arc::as_ptr(&world.flags), self.world.as_ptr()))
-        {
+        let unchanged =
+            world.is_some_and(|world| std::ptr::eq(Arc::as_ptr(&world.flags), self.world.as_ptr()));
+        if !unchanged {
             self.pending.clear();
             self.world = world.map_or_else(Weak::new, |world| Arc::downgrade(&world.flags));
         }
         self.pending
             .retain(|pending| Instant::now() < pending.ticket.deadline);
+        unchanged
     }
 
     pub(crate) fn request(&mut self, game: &Game<'_>, name: String) -> bool {
