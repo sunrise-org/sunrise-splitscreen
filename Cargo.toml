@@ -2,7 +2,7 @@
 name = "mod-splitscreen"
 version = "0.1.0"
 edition = "2024"
-license-file = "LICENSE"
+license = "MIT"
 publish = false
 
 [dependencies]
